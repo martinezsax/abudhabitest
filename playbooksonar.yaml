@@ -1,0 +1,85 @@
+# Playbook for Docker and Sonarcube 
+
+- name: Docker Installation 
+  hosts: localhost 
+  become: yes 
+
+  tasks: 
+  - name: Install yum-utils 
+    yum: 
+      name: "{{ packages }}" 
+    vars: 
+      packages: 
+      - yum-utils
+
+  - name: Installation of Docker
+    shell: "amazon-linux-extras install docker" 
+
+  - name: Start Docker Service 
+    service: 
+      name: docker 
+      state: started 
+
+- name: Sonarqube and Postgreql Installation
+  hosts: localhost 
+  become: yes
+
+  tasks:  
+  - name: Docker PY Installation 
+    shell: "pip install docker-py"
+
+  - name: Community General Installation 
+    shell: "ansible-galaxy collection install community.general"    
+
+  - name: Pull Postgreql Docker Image
+    docker_container:
+      name: posgreql_sonarqube
+      image: postgres
+      state: started
+      volumes:
+        - /var/run/postgresql:/var/run/postgresql
+      env:
+          POSTGRES_PASSWORD=postgres
+      restart: yes
+      network_mode: "bridge" 
+
+  - name: Make sure psycopg2 is installed
+    yum:
+      name: "{{ packages }}"
+    vars:
+      packages:
+      - python-psycopg2
+
+  - name: Create sonar user for Postgreql
+    postgresql_user:
+       name: sonar
+       password: sonar
+       encrypted: yes
+
+  - name: Create sonar Postgreql database
+    postgresql_db:
+      name: sonardb
+      owner: sonar
+
+  - name: Value for Sonarqube 
+    command: sysctl -w vm.max_map_count=262144  
+  
+  - name: Pull Sonarcube Docker Image 
+    docker_container: 
+      name: sonarqube_test 
+      image: sonarqube 
+      links: 
+       - "posgreql_sonarqube:posgreql_sonarqube"
+      env: 
+          SONAR_JDBC_URL: jdbc:postgresql://posgreql_sonarqube:5432/sonardb
+          SONAR_JDBC_USERNAME: sonar 
+          SONAR_JDBC_PASSWORD: sonar
+      ulimits: nofile:65535:65535
+      volumes: 
+        - sonarqube_data:/opt/sonarqube/data 
+        - sonarqube_extensions:/opt/sonarqube/extensions
+        - sonarqube_logs:/opt/sonarqube/logs
+        - sonarqube_temp:/opt/sonarqube/temp 
+      ports: 
+       - 9000:9000
+      network_mode: "bridge"    
